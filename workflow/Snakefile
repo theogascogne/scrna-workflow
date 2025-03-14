@@ -1,398 +1,143 @@
 from collections import defaultdict
 from yaml import load
 import os
+import random
+import datetime
+import pathlib
+import sys
+import subprocess
 
 from snakemake.utils import Paramspace
 import pandas as pd
-import pathlib
-
-from snakemake.io import chain, expand, regex
-import sys
-import os
-import re
-import collections
-import random
-import datetime
+from snakemake.io import expand
 from itertools import repeat
 
-
+# Including external files by purpose
 include: "rules/extra_functions.smk"
-option=config.get("option","standard") # select standard option for full analysis
-runid=config.get("runid","".join(random.choices("abcdefghisz",k=3) + random.choices("123456789",k=5)))
-logname = "_".join(["cellsnake",runid, datetime.datetime.now().strftime("%y%m%d_%H%M%S"),option,"log"])
+# Importing Python files
+from workflow_utils.workflow_funcs import file_capture_try, initialization_of_paramspace
+from workflow_utils.create_plot_functions import sample_parameter
+from workflow_utils.Defaults import config as configDef #renamed to configDef as snakemake uses its own config if a .yaml is used.
 
-cellsnake_path=config.get('cellsnake_path','') #if called by cellsnake
-datafolder=config.get("datafolder","data") #this can be a directory with samples or a single file to process
-analyses_folder=config.get("analyses_folder","analyses")
-results_folder=config.get("results_folder","results")
-is_integrated_sample=config.get("is_integrated_sample",False)
-gene_to_plot=[] if config.get("gene_to_plot",None) is None else [config.get("gene_to_plot")]
+# Configuration settings - these have to be declared here too or else the rules will not have access to them. While snakefile does have its own config as mentioned
+# above, its default have been merged with Defaults's configs so both snakefile and python scripts share the same settings and dont have to declare its defaults
+# this script's 'native' config is based on config.yaml
+option = config.get("option", "standard")  # bug where it wont accept option from Defaults.py. Alltho because sample parameter uses this in its arguments, the 
+                                           # rest of the .py should have access to it too during runtime, not during unit testing so keep that in mind!
+cellsnake_path=config.get('cellsnake_path','') #if called by cellsnake - this needs to come from .yaml, investigate why.
 
+runid = configDef.runid
+logname = configDef.logname
+datafolder = configDef.datafolder
+analyses_folder = configDef.analyses_folder
+results_folder = configDef.results_folder
+is_integrated_sample = configDef.is_integrated_sample
+gene_to_plot = configDef.gene_to_plot if configDef.gene_to_plot else []
 
-#configfile: "config.yaml"
+# Basic parameters
+min_cells = configDef.min_cells
+min_features = configDef.min_features
+max_features = configDef.max_features
+max_molecules = configDef.max_molecules
+min_molecules = configDef.min_molecules
+percent_mt = configDef.percent_mt
+percent_rp = configDef.percent_rp
+highly_variable_features = configDef.highly_variable_features
+variable_selection_method = configDef.variable_selection_method
+doublet_filter = "--doublet.filter" if configDef.doublet_filter in [True, "TRUE", "True", "T"] and not is_integrated_sample else ""
+metadata = configDef.metadata
+metadata_column = configDef.metadata_column
+keywords = configDef.keywords
+exact = "--exact" if configDef.exact in [True, "TRUE", "True", "T"] else ""
+subset_file = configDef.subset_file
+subset_column = configDef.subset_column
+min_percentage_to_plot = configDef.min_percentage_to_plot
+mapping = configDef.mapping
+organism = configDef.organism
+species = configDef.species
 
-files=[]
-def file_capture(datafolder):
-    files = cellsnake_glob_wildcards(datafolder + "/{sample}/outs/filtered_feature_bc_matrix/matrix.mtx.gz").sample + cellsnake_glob_wildcards(datafolder + "/{sample}/outs/filtered_feature_bc_matrix/matrix.mtx").sample + cellsnake_glob_wildcards(datafolder + "/{sample}/outs/filtered_feature_bc_matrix.h5").sample 
-    if files:
-        return files
-    
-    files = cellsnake_glob_wildcards(datafolder +  "/{sample}/matrix.mtx.gz").sample + cellsnake_glob_wildcards(datafolder +  "/{sample}/matrix.mtx").sample
+# Automatic MT filtering
+grid_search = config.get("grid_search", False)
 
-    if files:
-        return files
+# Clustering and normalization parameters
+normalization_method = configDef.normalization_method
+scale_factor = configDef.scale_factor
+resolution = configDef.resolution
 
-    files = cellsnake_glob_wildcards(datafolder +  "/{sample}/raw_feature_bc_matrix/matrix.mtx.gz").sample + cellsnake_glob_wildcards(datafolder +  "/{sample}/raw_feature_bc_matrix/matrix.mtx").sample
+umap_plot = "--umap" if config.get("umap_plot", True) in [True, "TRUE", "True", "T"] else ""  #changing these 3 throws more warning, investigate further.
+tsne_plot = "--tsne" if config.get("tsne_plot", True) in [True, "TRUE", "True", "T"] else ""
+show_labels = "--labels" if config.get("show_labels", True) in [True, "TRUE", "True", "T"] else ""
 
-    if files:
-        return files
-
-    files = cellsnake_glob_wildcards(datafolder + "/{sample}/filtered_feature_bc_matrix.h5").sample
-    if files:
-        return files
-
-    #files=list(filter(lambda i: "/" not in i, cellranger_new + cellranger_old + h5files)) #do not capture subdirectories etc
-    return files
-
-try:
-
-    if os.path.isdir(datafolder):
-        files=file_capture(datafolder)
-        files=list(filter(lambda i: "/" not in i, files))
-
-        if len(files)==0:
-            head,tail = os.path.split(datafolder.strip("/"))
-            files=file_capture(head) #probably capture a single file here
-            files=[x for x in files if tail in x]
-            if files:
-                datafolder=head
-
-    if os.path.isfile(datafolder):
-        file_extension = pathlib.Path(datafolder)
-        if (file_extension.suffix).lower() not in [".rds"]:
-            files = [file_extension.stem]
-        elif is_integrated_sample:
-            analyses_folder="analyses_integrated"
-            results_folder="results_integrated"
-            files = [file_extension.stem]
-        elif (file_extension.suffix).lower() in [".rds"] and option in ["subset"]:
-            files = datafolder
-    
-    files=set(files) if isinstance(files,list) else files
-    print("Samples detected : " + " ".join(files))
-
-except:
-    print("No samples detected or something went wrong...")
-
-
-
-#basic paramaters
-min_cells=config.get("min_cells",3)
-min_features=config.get("min_features",200) #nFeature_RNA
-max_features=config.get("max_features","Inf") #nFeature_RNA
-max_molecules=config.get("max_molecules","Inf") #nCount_RNA
-min_molecules=config.get("min_molecules",0) #nCount_RNA
-percent_mt=str(config.get("percent_mt",10)) #if not automatic, this will be used for all samples
-percent_rp=config.get("percent_rp",0) #by default, no filtering on ribosomal genes percentage 
-highly_variable_features=config.get("highly_variable_features",2000)
-variable_selection_method=config.get("variable_selection_method","vst")
-doublet_filter= "--doublet.filter" if config.get("doublet_filter",True) in [True,"TRUE","True","T"] and is_integrated_sample is False else ""
-metadata=config.get("metadata","metadata.csv")
-metadata_column=config.get("metadata_column","condition")
-keywords=config.get("keywords",1)
-exact="--exact" if config.get("exact",True) in [True,"TRUE","True","T"] else ""
-subset_file=config.get("subset_file","subset")
-subset_column=config.get("subset_column","seurat_clusters")
-
-min_percentage_to_plot=config.get("min_percentage_to_plot",5) #only plot clusters with more than 5% of cells
-
-#automatic mt filtering
-grid_search=config.get("grid_search",False) #requires params file in tsv format
-
-
-#automatic cluster/resolution detection
-#detect_resolution=config.get("detect_resolution",True)
-
-#clustering and normalization paramaters
-normalization_method=config.get("normalization_method","LogNormalize")
-scale_factor=config.get("scale_factor",10000)
-#resolution=config.get("resolution","0.8" if is_integrated_sample is False else "0.3") #a double or "auto", default is 0.8
-resolution=config.get("resolution","0.8") #a double or "auto", default is 0.8
-
-#dimension reduction options: by default both UMAP and TSNE will be plotted with predicted clusters
-umap_plot="--umap" if config.get("umap_plot",True) in [True,"TRUE","True","T"] else ""
-tsne_plot="--tsne" if config.get("tsne_plot",True) in [True,"TRUE","True","T"] else ""
-show_labels="--labels" if config.get("show_labels",True) in [True,"TRUE","True","T"] else ""
-
-#Each marker plot contains a DimPlot, by default only UMAP plots will be created (to save space and time), this behavior can be changed.
-umap_markers_plot="--umap" if config.get("umap_markers_plot",True) in [True,"TRUE","True","T"] else ""
-tsne_markers_plot="--tsne" if config.get("tsne_markers_plot",False) in [True,"TRUE","True","T"] else ""
-
-#Differential expression paramaters
-logfc_threshold=config.get("logfc_threshold",0.25)
-test_use=config.get("test_use","wilcox")
-marker_plots_per_cluster_n=config.get("marker_plots_per_cluster_n",20) #only print top 10 by default
-
-
-identity_to_analysis=[config.get("identity_to_analysis","seurat_clusters")]
-
-selected_gene_file=config.get("selected_gene_file","markers.tsv")
-
-#enrichment paramaters
-algorithm=config.get("algorithm","weight01")
-statistics=config.get("statistics","ks")
-mapping=config.get("mapping","org.Hs.eg.db")
-organism=config.get("organism","hsa")
+# Differential expression parameters
+logfc_threshold = configDef.logfc_threshold
+test_use = configDef.test_use
+marker_plots_per_cluster_n = configDef.marker_plots_per_cluster_n
+identity_to_analysis = configDef.identity_to_analysis
+selected_gene_file = configDef.selected_gene_file
 
 #GSEA
-gsea_file=cellsnake_path + "workflow/bundle/c2.cgp.v2022.1.Hs.symbols.gmt" if config.get("gsea_file") is None else config.get("gsea_file")
-gsea_group=config.get("gsea_group","seurat_clusters")
+gsea_file = configDef.gsea_file if configDef.gsea_file else cellsnake_path + "workflow/bundle/c2.cgp.v2022.1.Hs.symbols.gmt"
+gsea_group = configDef.gsea_group
+integration_id = configDef.integration_id
+celltypist_model = configDef.celltypist_model
+singler_ref = configDef.singler_ref
+singler_granulation = configDef.singler_granulation
 
+# Kraken DB
+kraken_db_folder = configDef.kraken_db_folder
+prekraken_db_folder = configDef.prekraken_db_folder
+taxa = configDef.taxa
+microbiome_min_cells = configDef.microbiome_min_cells
+microbiome_min_features = configDef.microbiome_min_features
+confidence = configDef.confidence
+min_hit_groups = configDef.min_hit_groups
+kraken_extra_files = True if configDef.kraken_extra_files in [True, "TRUE", "True", "T"] else False
+bowtie_database_prefix = configDef.bowtie_database_prefix
+complexity = configDef.complexity
+reduction = configDef.reduction
+dims = configDef.dims
 
-integration_id=config.get("integration_id","integrated")
-celltypist_model=config.get("celltypist_model","Immune_All_Low.pkl")
-singler_ref=config.get("singler_ref","BlueprintEncodeData") #HumanPrimaryCellAtlasData
-singler_granulation=config.get("singler_granulation","label.main") #HumanPrimaryCellAtlasData
-
-
-#cellchat
-species=config.get("species","human") #cellchat species, only mouse or human
-
-#Kraken DB
-kraken_db_folder=config.get("kraken_db_folder",None)
-prekraken_db_folder=config.get("prekraken_db_folder",None)
-taxa=config.get("taxa","genus")
-microbiome_min_cells=config.get("microbiome_min_cells",1)
-microbiome_min_features=config.get("microbiome_min_features",3)
-confidence=config.get("confidence",0.01)
-min_hit_groups=config.get("min_hit_groups",3)
-kraken_extra_files=True if config.get("kraken_extra_files",False) in [True,"TRUE","True","T"] else False
-bowtie_database_prefix=config.get("bowtie_database_prefix",None)
-
-complexity=config.get("complexity",0)
-
-reduction=config.get("reduction","cca")
-dims=config.get("dims",30)
-
-#initialization of paramspace object using defaults
-def initialization_of_paramspace(tsv_file,dictionary):
-    if os.path.isfile(tsv_file) and grid_search is True:
-        par_df = pd.read_table(tsv_file) # if available and use for all samples
-    else:
-        par_df =  pd.DataFrame(dictionary) # if not available, create using default numbers and use for all samples
-    
-    return par_df
-
-
-if is_integrated_sample:
-    identity_to_analysis.append("orig.ident")
-    percent_mt="auto" #if integrated auto
-
+files = file_capture_try(datafolder)
 par_df = initialization_of_paramspace("params.tsv",{"percent_mt":[percent_mt],"resolution":[resolution]})
 paramspace=Paramspace(par_df)
+#interactive error handling
+error_handler = "~/miniconda3/envs/test/lib/python3.9/site-packages/cellsnake/scrna/workflow/workflow_utils/intErrHandle.sh"
 
-def dim_reduction_and_marker_plots(paramspace,identity):
-    plots=[]
-    if umap_markers_plot:
-        plots = plots + expand([results_folder + "/" + s + "/{params}/positive_marker_plots_umap/" + i + "/" for i in identity for s in files],params=list(paramspace.instance_patterns))
-    if tsne_markers_plot:
-        plots = plots + expand([results_folder + "/" + s + "/{params}/positive_marker_plots_tsne/" + i + "/" for i in identity for s in files],params=list(paramspace.instance_patterns))
-    return plots
+# Check for test mode
+is_test_mode = config.get("test", False)
 
-try:
-    if os.path.isfile(selected_gene_file):
-        df=pd.read_table(selected_gene_file)
-        gene_to_plot += df[df.columns[0]].values.tolist()
-except:
-    pass
+samples = ["10X_17_028", "10X_17_029"] # debugging purpose.
 
-def selected_gene_plot(paramspace,gene_to_plot,identity):
-    plots=[]
-    if gene_to_plot:
-        plots = plots + expand([results_folder + "/" + s +  "/{params}/selected_gene_plots_umap/" + i + "/" + g + ".pdf" for i in identity for g in gene_to_plot for s in files],params=list(paramspace.instance_patterns))
-        plots = plots + expand([results_folder + "/" + s +  "/{params}/selected_gene_plots_tsne/" + i + "/" + g + ".pdf" for i in identity for g in gene_to_plot for s in files],params=list(paramspace.instance_patterns))
-    return plots
+#Bare-bones error handler - a work in progress to see if its possible to give the user more control during job error if they wish to skip, retry or quit the workflow.
+def halt_workflow():
+    print("\nA rule failed during execution.")
+    print("Choose an action:")
+    print("[r] Retry the rule.")
+    print("[q] Quit the workflow.")
+        
+    choice = input("Enter your choice (r/q): ").strip().lower()
+    snakefile_dir = os.path.expanduser("~/miniconda3/envs/test/lib/python3.9/site-packages/cellsnake/scrna/workflow")
+        
+    if choice == "r":
+        print("Retrying the rule...")
+        subprocess.run("snakemake --retries 1 --rerun-incomplete -k --cores 2", shell=True, cwd=snakefile_dir)
+    elif choice == "q":
+        print("Quitting the workflow. Goodbye!")
+        sys.exit(1)  # Exits the workflow.
+    else:
+        print("Invalid input. Please enter 'r' to retry or 'q' to quit.")
 
-def identity_dependent_dimplot(paramspace,identity):
-    plots=[]
-    if len(identity) > 0:
-        plots = plots + expand([results_folder + "/" + s + "/{params}/plot_dimplot_" + u + "-" + x + ".pdf" for u in ["umap","tsne","pca"] for x in identity for s in files],params=list(paramspace.instance_patterns))
-    return plots
+# Decide which rules to include based on 'option' and test mode
+if option in ["test"] and files:
+    include: "rules/seuratTest.smk"
+    rule all:
+        input:
+            sample_parameter(paramspace,files, option)  # Use the test input list function if test mode is on
+            #expand("results/{sample}/resolution~0.8/output.txt", sample=samples)
 
-def identity_dependent_metrics(paramspace,identity):
-    plots=[]
-    if len(identity) > 0:
-        plots +=  expand([results_folder + "/" + s + "/{params}/metrics/plot_cellcount-" + x + ".pdf"  for x in identity for s in files],params=list(paramspace.instance_patterns))
-        plots +=  expand([results_folder + "/" + s + "/{params}/metrics/plot_cellcount_barplot-" + x + ".pdf"  for x in identity for s in files],params=list(paramspace.instance_patterns))
-        plots +=  expand([results_folder + "/" + s + "/{params}/metrics/plot_cellcount_barplot-" + x + ".html"  for x in identity for s in files],params=list(paramspace.instance_patterns))
-        plots +=  expand([results_folder + "/" + s + "/{params}/metrics/table_metrics-" + x + ".xlsx"  for x in identity for s in files],params=list(paramspace.instance_patterns))
-    return plots
+#this part can be improved by encapsulating the integration/integrate conditional's content in a function
 
-def cellchat_plot(paramspace,identity):
-    plots=[]
-    #identity.append("singler") #add majority voting to the list of identities but for now drop this
-    if len(identity) > 0:
-        plots = plots + expand([results_folder + "/" + s + "/{params}/cellchat/" + x + "/" for x in identity for s in files],params=list(paramspace.instance_patterns))
-    return plots
-
-def celltypist_analysis(paramspace,celltypist_model,identity):
-    plots=[]
-    if celltypist_model:
-        plots += expand([results_folder + "/" + s + "/{params}/celltypist/" + celltypist_model + "/plot_celltypist_dotplot-" + x + ".pdf" for x in identity_to_analysis  for s in files],params=list(paramspace.instance_patterns))
-        plots += expand([results_folder + "/" + s + "/{params}/celltypist/" + celltypist_model + "/plot_celltypist_umap-" + x + ".pdf" for x in identity_to_analysis  for s in files],params=list(paramspace.instance_patterns))
-        plots += expand([results_folder + "/" + s + "/{params}/celltypist/" + celltypist_model + "/plot_celltypist_tsne-" + x + ".pdf" for x in identity_to_analysis  for s in files],params=list(paramspace.instance_patterns))
-    return plots
-
-def gsea_analysis(paramspace,identity):
-    outs=[]
-    #identity.append("singler")
-    if len(set(identity)) > 0 and os.path.isfile(gsea_file):
-        outs = outs + expand([results_folder + "/" + s + "/{params}/gsea/table_gsea_output-" + x + ".xlsx" for x in identity for s in files],params=list(paramspace.instance_patterns))
-    return outs
-
-def enrichment_analysis(paramspace,identity):
-    outs=[]
-    #identity.append("singler")
-    if len(set(identity)) > 0:
-        outs += expand([results_folder + "/" + s + "/{params}/enrichment_analysis/table_GO-enrichment-" + x + ".xlsx" for x in identity for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/enrichment_analysis/table_GO-geneset_enrichment-" + x + ".xlsx" for x in identity for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/enrichment_analysis/table_KEGG-enrichment-" + x + ".xlsx" for x in identity for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/enrichment_analysis/table_KEGG-geneset_enrichment-" + x + ".xlsx" for x in identity for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/enrichment_analysis/table_KEGG-module_enrichment-" + x + ".xlsx" for x in identity for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/enrichment_analysis/table_KEGG-module_geneset_enrichment-" + x + ".xlsx" for x in identity for s in files],params=list(paramspace.instance_patterns))
-    return outs
-
-def metadata_pairwise_deseq_analysis(paramspace,metadata_column):
-    outs=[]
-    if os.path.isfile(metadata) and is_integrated_sample:
-        outs += expand([results_folder + "/" + s + "/{params}/metaplot_volcano-" + metadata_column + ".pdf" for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/metatable_positive-markers-" + metadata_column + ".xlsx" for s in files],params=list(paramspace.instance_patterns))
-    return outs
-
-
-
-def kraken_predictions(paramspace,taxa,identity):
-    #bamfiles=cellsnake_glob_wildcards(datafolder + "/{sample}/outs/possorted_genome_bam.bam").sample + cellsnake_glob_wildcards(datafolder + "/{sample}/possorted_genome_bam.bam").sample 
-    outs=[]
-    identity.append("singler")
-    if kraken_db_folder is not None:
-        #outs = outs + expand([results_folder + "/" + s + "/{params}/microbiome/plot_microbiome_barplot-" + taxa + "-level.pdf" for s in files],params=list(paramspace.instance_patterns))
-        outs = outs + expand([results_folder + "/" + s + "/{params}/microbiome/" + str(confidence) + "_" + str(min_hit_groups) + "/plot_microbiome_dimplot-" + taxa + "-" + x + ".pdf" for x in ["umap","tsne"] for s in files],params=list(paramspace.instance_patterns))
-        #outs = outs + expand([results_folder + "/" + s + "/{params}/microbiome/plot_significance-" + taxa + "-" + x + ".pdf" for x in identity for s in files],params=list(paramspace.instance_patterns))
-        outs = outs + expand([results_folder + "/" + s + "/{params}/microbiome/" + str(confidence) + "_" + str(min_hit_groups) + "/table_microbiome-" + taxa + "-" + x + ".xlsx" for x in identity for s in files],params=list(paramspace.instance_patterns))
-        #outs = outs + expand([analyses_folder + "/kraken/{sample}/{taxa}.h5seurat"],sample=files,taxa=taxa)
-        outs = outs + ["analyses_integrated/seurat/" + str(confidence) + "_" + str(min_hit_groups) + "/"  + integration_id + "-" + taxa + ".rds"]
-    elif is_integrated_sample is True and os.path.isfile("analyses_integrated/seurat/" + str(confidence) + "_" + str(min_hit_groups) + "/"  + integration_id + "-" + taxa + ".rds"):
-        #outs = outs + expand([results_folder + "/" + s + "/{params}/microbiome/plot_microbiome_barplot-" + taxa + "-level.pdf" for s in files],params=list(paramspace.instance_patterns))
-        outs = outs + expand([results_folder + "/" + s + "/{params}/microbiome/" + str(confidence) + "_" + str(min_hit_groups) + "/plot_microbiome_dimplot-" + taxa + "-" + x + ".pdf" for x in ["umap","tsne"] for s in files],params=list(paramspace.instance_patterns))
-        outs = outs + expand([results_folder + "/" + s + "/{params}/microbiome/" + str(confidence) + "_" + str(min_hit_groups) + "/table_microbiome-" + taxa + "-" + x + ".xlsx" for x in identity for s in files],params=list(paramspace.instance_patterns))
-    return outs
-
-
-def write_main_log(files):
-
-    pathlib.Path("logs/").mkdir(parents=True, exist_ok=True)
-    with open("logs/" + logname,"w") as f:
-        f.write("Total number of samples processed : " + str(len(files)) + "\n")
-        f.write("Sample names in this run : " + " ".join(files) + "\n")
-        f.write("Run ID : " + str(runid) + "\n")
-        f.write("Option : " + str(option) + "\n")
-
-
-
-
-def write_sample_log(sample,paramspace):
-    l=results_folder + "/" + sample + "/logs/"
-    pathlib.Path(l).mkdir(parents=True, exist_ok=True)
-    with open(l + runid + ".txt","w") as f:
-        f.write("Sample name : " + sample + "\n")
-        f.write("Run ID : " + str(runid) + "\n")
-        f.write("Run option : " + str(option) + "\n")
-        f.write("Main directory and params : " + "".join(list(paramspace.instance_patterns)) + "\n")
-        f.write("Minimum cells : " + str(min_cells) + "\n")
-        f.write("Minimum features (nFeature_RNA) : " + str(min_features) + "\n")
-        f.write("Maximum features (nFeature_RNA) : " + str(max_features) + "\n")
-        f.write("Maximum molecules (nCount_RNA) : " + str(max_molecules) + "\n")
-        f.write("Minimum molecules (nCount_RNA) : " + str(min_molecules) + "\n")
-        f.write("Percent mitochondrial gene treshold (smaller than) : " + str(percent_mt) + "\n")
-        f.write("Percent ribosomal gene treshold (larger than) : " + str(percent_rp) + "\n")
-        f.write("Resolution : " + str(resolution) + "\n")
-        f.write("Highly variable genes : " + str(highly_variable_features) + "\n")
-        f.write("Doublet filter : " + str(config.get("doublet_filter",True)) + "\n")
-        f.write("Normalization method : " + str(normalization_method) + "\n")
-        f.write("Scale factor : " + str(scale_factor) + "\n")
-        f.write("LogFC treshold : " + str(logfc_threshold) + "\n")
-        f.write("DE test use : " + str(test_use) + "\n")
-        #f.write("Algorithm (GO enrichment) : " + str(algorithm) + "\n")
-        #f.write("Statistics (GO enrichment) : " + str(statistics) + "\n")
-        f.write("Mapping (GO and KEGG enrichment) : " + str(mapping) + "\n")
-        f.write("Organism (KEGG enrichment) : " + str(organism) + "\n")
-        f.write("Species (cellchat) : " + str(species) + "\n")
-        #f.write("Ontology (GO enrichment) : " + str(ontology) + "\n")
-        f.write("SingleR reference : " + str(singler_ref) + "\n")
-        f.write("Celltypist model : " + str(celltypist_model) + "\n")
-        f.write("Kraken DB folder : " + str(kraken_db_folder) + "\n")
-        f.write("Collapse to this taxanomic level : " + str(taxa) + "\n")
-        f.write("Kraken confidence param : " + str(confidence) + "\n")
-        f.write("Kraken minimum hit groups : " + str(min_hit_groups) + "\n")
-
-
-def singler_plots(paramspace,identity):
-    plots=[]
-    if len(identity) > 0:
-        plots +=  expand([results_folder + "/" + s + "/{params}/singler/plot_score_heatmap-" + x + ".pdf" for x in identity_to_analysis for s in files],params=list(paramspace.instance_patterns))
-        plots +=  expand([results_folder + "/" + s + "/{params}/singler/plot_clusters-" + x + ".pdf" for x in identity_to_analysis for s in files],params=list(paramspace.instance_patterns))
-        plots +=  expand([results_folder + "/" + s + "/{params}/singler/plot_score_heatmap_top-" + x + ".pdf" for x in identity_to_analysis for s in files],params=list(paramspace.instance_patterns))
-    return plots
-
-
-def sample_parameter(paramspace,files):
-    outs=[]
-    if option in ["standard","advanced"]:
-        outs = outs + [
-                expand([results_folder + "/" + s + "/{params}/summarized_markers-for-" + x + ".pdf" for x in identity_to_analysis for s in files],params=list(paramspace.instance_patterns)),
-                expand([results_folder + "/" + s + "/{params}/plot_marker-heatmap-" + x + ".pdf" for x in identity_to_analysis for s in files],params=list(paramspace.instance_patterns)),
-                expand([results_folder + "/" + s + "/{params}/table_average-expression-" + x + ".xlsx" for x in identity_to_analysis for s in files],params=list(paramspace.instance_patterns)),
-                #expand([results_folder + "/" + s + "/{params}/singler/clusters-celltype_annotation.pdf" for s in files],params=list(paramspace.instance_patterns)),
-                #expand([results_folder + "/" + s + "/{params}/singler/score_heatmap_top-celltype_annotation.pdf" for s in files],params=list(paramspace.instance_patterns)),
-                #expand([results_folder + "/" + s + "/{params}/singler/annotation.umap.html" for s in files],params=list(paramspace.instance_patterns)),
-                #gsea_analysis(paramspace,[x for x in identity_to_analysis if x != "orig.ident"]),
-                celltypist_analysis(paramspace,celltypist_model,identity_to_analysis),
-                enrichment_analysis(paramspace,identity_to_analysis),
-                expand([results_folder + "/" + s + "/{params}/trajectory/plot_monocle-partition-plot.pdf" for s in files],params=list(paramspace.instance_patterns))
-                ]
-    if option in ["minimal","standard","advanced"]:
-        outs = outs + [
-                identity_dependent_dimplot(paramspace,identity_to_analysis),
-                identity_dependent_metrics(paramspace,[x for x in identity_to_analysis if x != "orig.ident"]),
-                kraken_predictions(paramspace,taxa,[x for x in identity_to_analysis if x != "orig.ident"]),
-                selected_gene_plot(paramspace,gene_to_plot,identity_to_analysis),
-                expand([results_folder + "/" + s + "/{params}/plot_annotation_tsne.pdf" for s in files],params=list(paramspace.instance_patterns)),
-                expand([results_folder + "/" + s + "/{params}/plot_annotation_umap.pdf" for s in files],params=list(paramspace.instance_patterns)),
-                expand([results_folder + "/" + s + "/{params}/plot_annotation_pca.pdf" for s in files],params=list(paramspace.instance_patterns)),
-                metadata_pairwise_deseq_analysis(paramspace,metadata_column),
-                singler_plots(paramspace,identity_to_analysis)
-                ]
-    if option in ["clustree","clusteringTree","minimal","standard","advanced"]:
-        outs += expand([results_folder + "/" + s + "/{params}/technicals/plot_clustree.pdf" for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/technicals/plot_nFeature.pdf" for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/technicals/plot_nCount.pdf" for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/technicals/plot_mt.percent.pdf" for s in files],params=list(paramspace.instance_patterns))
-        outs += expand([results_folder + "/" + s + "/{params}/technicals/plot_rp.percent.pdf" for s in files],params=list(paramspace.instance_patterns))
-    if option in ["advanced"]:
-        outs += cellchat_plot(paramspace,[x for x in identity_to_analysis if x != "orig.ident"])
-        outs += dim_reduction_and_marker_plots(paramspace,identity_to_analysis)
-    if option not in ["clustree","clusteringTree","minimal","standard","advanced"]:
-        print("Please select a correct option...")
-
-    if not any(b in ["--dry-run", "--dryrun", "-n"] for b in sys.argv):
-        write_main_log(files)
-        list(map(write_sample_log, files,repeat(paramspace)))
-    return outs
-
-
-
-if option in ["integration","integrate"]:
+elif option in ["integration","integrate"]:
     #integration_files = list(pathlib.Path("analyses/processed/").rglob("*.rds"))
     a,b,c=cellsnake_glob_wildcards("analyses/processed/percent_mt~{a}/resolution~{b}/{c}.rds")
     integration_files=expand("analyses/processed/percent_mt~{a}/resolution~{b}/{c}.rds",zip,a=a,b=b,c=c)
@@ -429,7 +174,7 @@ elif option in ["minimal","standard","clustree","clusteringTree","advanced"] and
     include: "rules/microbiome.smk"
     rule all:
         input:
-            sample_parameter(paramspace,files)
+            sample_parameter(paramspace,files, option)
 
 elif option in ["subset"] and files:
     include: "rules/subset.smk"
@@ -441,3 +186,8 @@ elif option in ["subset"] and files:
 else:
     print("Please select a correct option or no files detected...")
     pass
+
+# Error handler to signal the wrapper
+# On error, call the above function
+#onerror:
+    #halt_workflow()
