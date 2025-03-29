@@ -63,7 +63,7 @@ require(patchwork)
 
 try(
   {
-    source("workflow/scripts/scrna-functions.R")
+    source("~/miniconda3/envs/test/lib/python3.9/site-packages/cellsnake/scrna/workflow/scripts/scrna-functions.R")
   },
   silent = TRUE
 )
@@ -154,8 +154,8 @@ if (opt$doublet.filter) {
   nExp_poi.adj <- round(nExp_poi * (1 - homotypic.prop))
 
   ## Run DoubletFinder with varying classification stringencies ----------------------------------------------------------------
-  scrna <- doubletFinder_v3(scrna, PCs = 1:10, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
-  scrna <- doubletFinder_v3(scrna, PCs = 1:10, pN = 0.25, pK = 0.09, nExp = nExp_poi.adj, reuse.pANN = paste0("pANN_0.25_0.09_", nExp_poi), sct = FALSE)
+  scrna <- doubletFinder(scrna, PCs = 1:10, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+  scrna <- doubletFinder(scrna, PCs = 1:10, pN = 0.25, pK = 0.09, nExp = nExp_poi.adj, reuse.pANN = paste0("pANN_0.25_0.09_", nExp_poi), sct = FALSE)
 
 
   scrna@meta.data %>%

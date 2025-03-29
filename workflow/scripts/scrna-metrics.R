@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 option_list <- list(
   optparse::make_option(c("--rds"),
-    type = "character", default = NULL,
+    type = "character", default = "~/Documents/cellsnake_shared/fetal-brain/analyses/raw/percent_mt~10/resolution~0.8/10X_17_028.rds",
     help = "Processed rds file of a Seurat object", metavar = "character"
   ),
   optparse::make_option(c("--sampleid"),
@@ -44,8 +44,6 @@ require(Seurat)
 require(tidyverse)
 # try({source("workflow/scripts/scrna-functions.R")})
 # try({source(paste0(system("python -c 'import os; import cellsnake; print(os.path.dirname(cellsnake.__file__))'", intern = TRUE),"/scrna/workflow/scripts/scrna-functions.R"))})
-
-
 
 scrna <- readRDS(file = opt$rds)
 

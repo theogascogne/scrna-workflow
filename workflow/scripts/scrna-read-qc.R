@@ -1,68 +1,6 @@
 #!/usr/bin/env Rscript
 
-option_list <- list(
-  optparse::make_option(c("--min.cells"),
-    type = "integer", default = 3,
-    help = "Min cells [default= %default]", metavar = "integer"
-  ),
-  optparse::make_option(c("--min.features"),
-    type = "integer", default = 200,
-    help = "Min features, nFeature_RNA [default= %default]", metavar = "character"
-  ),
-  optparse::make_option(c("--max.features"),
-    type = "integer", default = Inf,
-    help = "Max features, nFeature_RNA [default= %default]", metavar = "character"
-  ),
-  optparse::make_option(c("--max.molecules"),
-    type = "integer", default = Inf,
-    help = "Max molecules, nCount_RNA [default= %default]", metavar = "character"
-  ),
-  optparse::make_option(c("--min.molecules"),
-    type = "integer", default = 0,
-    help = "Min molecules, nCount_RNA [default= %default]", metavar = "character"
-  ),
-  optparse::make_option(c("--data.dir"),
-    type = "character", default = NULL,
-    help = "Data directory", metavar = "character"
-  ),
-  optparse::make_option(c("--sampleid"),
-    type = "character", default = NULL,
-    help = "Sample ID", metavar = "character"
-  ),
-  optparse::make_option(c("--percent.mt"),
-    type = "character", default = "10",
-    help = "Max mitochondrial gene percentage, smaller than [default= %default]", metavar = "character"
-  ),
-  optparse::make_option(c("--percent.rp"),
-    type = "double", default = 0,
-    help = "Min ribosomal gene percentage, greater than [default= %default]", metavar = "character"
-  ),
-  optparse::make_option(c("--before.violin.plot"),
-    type = "character", default = "before.violin.pdf",
-    help = "Violin plot name [default= %default]", metavar = "character"
-  ),
-  optparse::make_option(c("--after.violin.plot"),
-    type = "character", default = "after.violin.pdf",
-    help = "Violin plot name [default= %default]", metavar = "character"
-  ),
-  optparse::make_option(c("--output.rds"),
-    type = "character", default = "output.rds",
-    help = "Output RDS file name [default= %default]", metavar = "character"
-  ),
-  optparse::make_option(c("--plot.mtplot"),
-    type = "character", default = "plot.mtplot.pdf",
-    help = "Violin plot name [default= %default]", metavar = "character"
-  )
-)
-
-opt_parser <- optparse::OptionParser(option_list = option_list)
-opt <- optparse::parse_args(opt_parser)
-
-if (is.null(opt$data.dir) || is.null(opt$sampleid)) {
-  optparse::print_help(opt_parser)
-  stop("At least one argument must be supplied (data.dir and sampleid)", call. = FALSE)
-}
-
+# Load optparse package first
 require(optparse)
 require(tidyverse)
 require(Seurat)
@@ -71,9 +9,96 @@ require(tools)
 require(data.table)
 
 
+# Define the option list using the optparse functions
+option_list <- list(
+  make_option(c("--min.cells"),
+    type = "integer", default = 3,
+    help = "Min cells [default= %default]", metavar = "integer"
+  ),
+  make_option(c("--min.features"),
+    type = "integer", default = 200,
+    help = "Min features, nFeature_RNA [default= %default]", metavar = "character"
+  ),
+  make_option(c("--max.features"),
+    type = "integer", default = Inf, # inf DOES NOT WORK for optparse, this is fixed under the optparse section
+    help = "Max features, nFeature_RNA [default= %default]", metavar = "character"
+  ),
+  make_option(c("--max.molecules"),
+    type = "integer", default = Inf,  # inf DOES NOT WORK for optparse, this is fixed under the optparse section
+    help = "Max molecules, nCount_RNA [default= %default]", metavar = "character"
+  ),
+  make_option(c("--min.molecules"),
+    type = "integer", default = 0,
+    help = "Min molecules, nCount_RNA [default= %default]", metavar = "character"
+  ),
+  make_option(c("--data.dir"),
+    type = "character", default = NULL,
+    help = "Data directory", metavar = "character"
+  ),
+  make_option(c("--sampleid"),
+    type = "character", default = NULL,
+    help = "Sample ID", metavar = "character"
+  ),
+  make_option(c("--percent.mt"),
+    type = "character", default = "10",
+    help = "Max mitochondrial gene percentage, smaller than [default= %default]", metavar = "character"
+  ),
+  make_option(c("--percent.rp"),
+    type = "double", default = 0,
+    help = "Min ribosomal gene percentage, greater than [default= %default]", metavar = "character"
+  ),
+  make_option(c("--before.violin.plot"),
+    type = "character", default = "before.violin.pdf",
+    help = "Violin plot name [default= %default]", metavar = "character"
+  ),
+  make_option(c("--after.violin.plot"),
+    type = "character", default = "after.violin.pdf",
+    help = "Violin plot name [default= %default]", metavar = "character"
+  ),
+  make_option(c("--output.rds"),
+    type = "character", default = "output.rds",
+    help = "Output RDS file name [default= %default]", metavar = "character"
+  ),
+  make_option(c("--plot.mtplot"),
+    type = "character", default = "plot.mtplot.pdf",
+    help = "Violin plot name [default= %default]", metavar = "character"
+  )
+)
+
+if (!exists("opt")) {
+  opt_parser <- OptionParser(option_list = option_list)
+  opt <- parse_args(opt_parser)
+}
+
+if (is.na(opt$max.features)) opt$max.features <- Inf
+if (is.na(opt$max.molecules)) opt$max.molecules <- Inf
+
+# for debugging interactive error handling, this will force a error exit
+# Force the failure
+#quit(status = 1)  # non-zero status forces failure
+
+#########################
+# Function to ensure directory exists before saving files
+ensure_dir_exists <- function(file_path) {
+  dir_path <- dirname(file_path)
+  if (!dir.exists(dir_path)) {
+    message("Creating missing directory: ", dir_path)
+    dir.create(dir_path, recursive = TRUE)
+  }
+}
+########################
+
+
+
+#opt$data.dir <- "~/Documents/cellsnake_shared/fetal-brain/data/10X_17_029/outs/filtered_feature_bc_matrix"
+#opt$sampleid <- "seur5"
+
+if (is.null(opt$data.dir) || is.null(opt$sampleid)) {
+  print_help(opt_parser)
+  stop("At least one argument must be supplied (data.dir and sampleid)", call. = FALSE)
+}
+
 # nFeature_RNA is the number of genes detected in each cell. nCount_RNA is the total number of molecules detected within a cell.
-
-
 
 function_read_input <- function(opt) {
   try(
@@ -140,9 +165,10 @@ scrna <- RenameCells(object = scrna, add.cell.id = make.names(opt$sampleid)) # a
 scrna[["percent.mt"]] <- PercentageFeatureSet(scrna, pattern = "^[Mm][Tt]-")
 scrna[["percent.rp"]] <- PercentageFeatureSet(scrna, pattern = "(?i)(^RP[SL])")
 
+ensure_dir_exists(opt$before.violin.plot) 
+
+scrna <- NormalizeData(scrna)  # This fills the "data" slot in RNA assay, needed as seurat 5 does not automatically store normalized data in 'data slot'
 VlnPlot(scrna, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.rp"), ncol = 4)
-
-
 ggsave(opt$before.violin.plot, width = 10, height = 4)
 
 # auto detection is obsolote but keep it for later use
@@ -151,10 +177,10 @@ ggsave(opt$before.violin.plot, width = 10, height = 4)
 # lower_bound_nFeature_RNA <- median(scrna$nFeature_RNA) - 3 * mad(scrna$nFeature_RNA, constant = 1)
 # upper_bound_nFeature_RNA <- median(scrna$nFeature_RNA) + 3 * mad(scrna$nFeature_RNA, constant = 1)
 
-
-
 ## subset
+# the top one here is the correct one, not the ones with bounds
 scrna <- subset(scrna, subset = nFeature_RNA < opt$max.features & nFeature_RNA >= opt$min.features & nCount_RNA < opt$max.molecules & nCount_RNA >= opt$min.molecules)
+#scrna <- subset(scrna, subset = nFeature_RNA < 5000 & nFeature_RNA >= 200 & nCount_RNA < 100000 & nCount_RNA >= 1000)
 
 # scrna <- subset(scrna, subset = nFeature_RNA > lower_bound_nFeature_RNA & nFeature_RNA < upper_bound_nFeature_RNA & nCount_RNA > lower_bound_nCount_RNA  & nCount_RNA < upper_bound_nCount_RNA & percent.mt < opt$percent.mt)
 
@@ -199,10 +225,9 @@ if (opt$percent.mt %in% c("auto", "Auto", "AUTO")) {
 scrna <- subset(scrna, subset = percent.rp >= opt$percent.rp)
 
 
-
+ensure_dir_exists(opt$after.violin.plot) 
 VlnPlot(scrna, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.rp"), ncol = 4)
-
 ggsave(opt$after.violin.plot, width = 10, height = 4)
 
-
+ensure_dir_exists(opt$output.rds)  # Ensure the directory exists for the RDS file
 saveRDS(scrna, file = opt$output.rds)

@@ -3,7 +3,7 @@
 
 option_list <- list(
       optparse::make_option(c("--rds"),
-            type = "character", default = NULL,
+            type = "character", default = "~/Documents/cellsnake_shared/fetal-brain/analyses/processed/percent_mt~10/resolution~0.8/10X_17_028.rds",
             help = "Processed rds file of a Seurat object", metavar = "character"
       ),
       optparse::make_option(c("--reduction.type"),
@@ -50,14 +50,25 @@ require(tidyverse)
 
 tryCatch(
       {
-            source("workflow/scripts/scrna-functions.R")
+            source("~/miniconda3/envs/test/lib/python3.9/site-packages/cellsnake/scrna/workflow/scripts/scrna-functions.R")
       },
       error = function(cond) {
             source(paste0(system("python -c 'import os; import cellsnake; print(os.path.dirname(cellsnake.__file__))'", intern = TRUE), "/scrna/workflow/scripts/scrna-functions.R"))
       }
 )
 
+# Hardcoding the GSEA file path#######################
+#gsea_file <- "~/miniconda3/envs/test/lib/python3.9/site-packages/cellsnake/scrna/workflow/bundle/c2.cgp.v2022.1.Hs.symbols.gmt"
 
+# Check if the GSEA file exists
+#if (!file.exists(gsea_file)) {
+#  stop("GSEA file not found: ", gsea_file)
+#}
+
+# Optionally, you can load the GSEA file here if required for the analysis
+# Example of how to load it (assuming you have a suitable function to handle GMT files):
+#gsea_data <- read.gmt(gsea_file)  # You need an appropriate function like `read.gmt` to load the file
+###############################################################
 
 scrna <- readRDS(file = opt$rds)
 DefaultAssay(scrna) <- "RNA"
@@ -82,8 +93,17 @@ if (!is.null(opt$csv)) {
 }
 
 
-
-
+# Print unique Idents in the Seurat object
+if ("seurat_clusters" %in% colnames(scrna@meta.data)) {
+  Idents(scrna) <- scrna@meta.data[["seurat_clusters"]]
+  unique_idents <- unique(Idents(scrna))
+  cat("Unique Idents in the RDS file:\n")
+  print(unique_idents)
+} else {
+  cat("SEURAT CLUSTERS NOT FOUND IN RDS.\n")
+  cat("Columns in meta.data:\n")
+  print(colnames(scrna@meta.data))
+}
 
 ###################### dimplot######################
 Idents(object = scrna) <- scrna@meta.data[[opt$idents]]

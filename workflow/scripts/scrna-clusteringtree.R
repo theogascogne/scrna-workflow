@@ -55,7 +55,7 @@ require(Seurat)
 require(clustree)
 try(
   {
-    source("workflow/scripts/scrna-functions.R")
+    source("~/miniconda3/envs/test/lib/python3.9/site-packages/cellsnake/scrna/workflow/scripts/scrna-functions.R")
   },
   silent = TRUE
 )
@@ -67,6 +67,7 @@ try(
 )
 
 scrna <- readRDS(file = opt$rds)
+#scrna <- readRDS(file = '~/miniconda3/envs/test/lib/python3.9/site-packages/cellsnake/analyses/raw/percent_mt~10/resolution~0.8/10X_17_029.rds')
 
 if (isFALSE(opt$integration)) {
   scrna <- NormalizeData(scrna, normalization.method = opt$normalization.method, scale.factor = opt$scale.factor)
