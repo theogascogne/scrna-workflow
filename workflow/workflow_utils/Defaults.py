@@ -3,8 +3,16 @@ import yaml
 import random
 import datetime
 
-# Defaults.py is used to allow .py scripts access to the default values in the workflow as they were previously declared in the snakefile
-# Calls to its values will first use the .yaml file's configurations, if it is not found, it will then use the defaults dictionary found below.
+# ==============================================================================
+# defaults.py
+# 
+# This module provides default configuration values for the scRNA-seq workflow.
+# It attempts to load user-defined parameters from a YAML config file; if not
+# found, it falls back on a predefined set of defaults found below.
+#
+# This allows Python scripts to access workflow parameters consistent with the
+# Snakefile's settings without hardcoding paths or parameters.
+# ==============================================================================
 
 # to avoid needing hard coded paths, the following section should dynamically find cellsnake's 'root directory'
 try:
@@ -48,7 +56,7 @@ defaults = {
 
     "tsv_file_path": os.path.join(cellsnake_path, "scrna/params.tsv"),
     "markers_file_path": os.path.join(cellsnake_path, "scrna/markers.tsv"),
-    "test_datafolder": os.path.join(cellsnake_path, "scrna/workflow/tests/testData"),
+    "test_datafolder": os.path.join(cellsnake_path, "scrna/workflow/tests/testData/data"),
 
     # GSEA
     "gsea_file": os.path.join(cellsnake_path, "scrna/workflow/bundle/c2.cgp.v2022.1.Hs.symbols.gmt"),
@@ -134,7 +142,10 @@ defaults = {
     # Misc
     "complexity": 0,
     "reduction": "cca",
-    "dims": 30
+    "dims": 30,
+    
+    # Experimental
+    "errHandle": False,
 }
 
 # Merge YAML config with defaults (YAML values override defaults)

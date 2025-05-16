@@ -1,6 +1,9 @@
 #!/usr/bin/env Rscript
-
+library(testthat)
 library(optparse)
+require(SingleR)
+require(SingleCellExperiment)
+require(Seurat)
 
 # Get the path to the 'cellsnake' package
 cellsnake_path <- system("python -c 'import cellsnake; print(cellsnake.__path__[0])'", intern = TRUE)
@@ -10,55 +13,40 @@ test_data_dir <- file.path(cellsnake_path, "scrna/workflow/tests/testData")
 
 # Define test options with dynamically constructed paths
 option_list <- list(
-  make_option(c("--rds"), type = "character", default = file.path(test_data_dir, "test/data/sample_seurat_object.rds"), help = "Processed rds file of a Seurat object", metavar = "character"),
-  make_option(c("--output"), type = "character", default = file.path(test_data_dir, "results/pred_test.rds"), help = "Output prediction file", metavar = "character"),
+  make_option(c("--rds"), type = "character", default = file.path(test_data_dir, "processed/defaultTest/output.rds"), help = "Processed rds file of a Seurat object", metavar = "character"),
+  make_option(c("--output"), type = "character", default = file.path(test_data_dir, "singler/defaultTest/annotation.rds"), help = "Output prediction file", metavar = "character"),
   make_option(c("--reference"), type = "character", default = "HumanPrimaryCellAtlasData", help = "SingleR reference", metavar = "character"),
   make_option(c("--granulation"), type = "character", default = "label.main", help = "SingleR granulation level", metavar = "character")
 )
 
-opt_parser <- OptionParser(option_list = option_list)
-opt <- parse_args(opt_parser)
+# parse options
+opt_parser <- optparse::OptionParser(option_list = option_list)
+opt <- optparse::parse_args(opt_parser)
 
-# Ensure the directory for output file exists
-dir.create(dirname(opt$output), recursive = TRUE, showWarnings = FALSE)
-
-# Remove any pre-existing test files
-file.remove(opt$output)
-
-# Construct the command to run the original script
-cmd <- paste(
-  "Rscript", file.path(cellsnake_path, "scrna/workflow/scripts/scrna-singler-annotation.R"),
-  "--rds", shQuote(opt$rds),
-  "--output", shQuote(opt$output),
-  "--reference", shQuote(opt$reference),
-  "--granulation", shQuote(opt$granulation)
+try(
+  {
+    source(file.path(cellsnake_path,"scrna/workflow/scripts/scrna_workflow_helper_functions/scrna-singler-annotation-functions.R"))
+  },
+  silent = TRUE
 )
 
-# Run the original script
-cat("Running command:\n", cmd, "\n")
-status <- system(cmd, intern = TRUE)
-cat("Command output:\n", status, "\n")
+# Load initial scrna object
+scrna <- readRDS(opt$rds)  # Replace with actual file path
 
-# Define color codes for terminal
-cyan <- "\033[0;36m"
-red <- "\033[0;31m"
-reset <- "\033[0m"
+test_that("SingleR celltype annotation runs correctly", {
 
-# Check if the expected output file exists and is not empty
-if (file.exists(opt$output)) {
-  # Try to read the RDS file to verify it contains valid data
-  pred <- tryCatch({
-    readRDS(opt$output)
-  }, error = function(e) {
-    NULL
+  suppressWarnings({
+    # Run the function and check that the output file is created
+    run_singleR_prediction(
+      rds_file = opt$rds, 
+      output_file = opt$output, 
+      reference = opt$reference, 
+      granulation = opt$granulation
+    )
   })
+  expect_true(file.exists(opt$output))
   
-  # Check if the read data is valid
-  if (!is.null(pred)) {
-    cat(cyan, "SUCCESS:", reset, "Found and successfully loaded the output file:", opt$output, "\n", reset, sep = "")
-  } else {
-    cat(red, "ERROR:", reset, "Output file found but could not be loaded or is empty:", opt$output, "\n", reset, sep = "")
-  }
-} else {
-  cat(red, "ERROR:", reset, "Expected output file missing:", opt$output, "\n", reset, sep = "")
-}
+  # Load the prediction to check its type
+  pred <- readRDS(opt$output)
+  expect_true(inherits(pred, "DFrame"))
+})

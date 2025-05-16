@@ -5,6 +5,18 @@ import pytest
 import pandas as pd
 from pathlib import Path
 
+
+# =========
+# Unit tests for workflow utility functions in workflow_funcs.py.
+#
+# These tests verify core file handling and parameter initialization functionality:
+# - file_capture and file_capture_try for detecting sample files in directories
+# - initialization_of_paramspace for generating parameter grids from config or TSV inputs
+#
+# The tests check both expected outputs on valid inputs and proper handling of edge cases,
+# including missing directories and parameter consistency.
+# =========
+
 # Ensure module path is recognized
 # work out current path, then go two steps back to workflow directory:  workflow/tests/py-tests, so defaults can be found inside workflow_utils.
 workflow_dir = Path(__file__).resolve().parents[2]
@@ -25,7 +37,7 @@ percent_mt = config.percent_mt
 # --- TESTS ---
 
 @pytest.mark.parametrize("test_datafolder, expected_files", [
-    (datafolder, {"10X_17_028", "10X_17_029"}),  # Valid test data
+    (datafolder, {"testSample"}),  # Valid test data
     (os.path.expanduser("huehuehue"), set()),  # Nonexistent directory
 ])
 def test_file_capture_try(test_datafolder, expected_files):
@@ -46,7 +58,7 @@ def test_file_capture(test_datafolder):
     for file in filesFound:
         print(file)
 
-    expected_samples = {'10X_17_028', '10X_17_029'}
+    expected_samples = {'testSample'}
     assert set(filesFound) == expected_samples, f"Expected {expected_samples}, but got {filesFound}"
 
 @pytest.mark.parametrize("grid_search, tsv_exists, expected_percent_mt, expected_resolution", [

@@ -16,7 +16,7 @@ import datetime
 from itertools import repeat
 
 #these are extra functions used in create_plot_functions.py. They essntially help creating wildcards for the workflow as seen inside workflow_funcs
-#where the glob wildards function is used to capture sample names
+#where the glob(al) wildards function is used to capture sample names
 
 _wildcard_regex = re.compile(
     r"""

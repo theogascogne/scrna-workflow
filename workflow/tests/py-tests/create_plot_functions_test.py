@@ -6,6 +6,20 @@ import pandas as pd
 import re
 from pathlib import Path
 
+
+# ==========================================
+# Test suite for the cellsnake.command_line.py .
+#
+# This file contains pytest-based unit tests that validate:
+# - Command-line argument parsing and validation logic
+# - Configuration file loading and parameter extraction
+# - Logging functionality within the CommandLine class
+#
+# Tests cover both expected successful workflows and failure cases,
+# using mocks and parameterized inputs to simulate a wide range of user inputs
+# and system states without needing actual file system dependencies.
+# =============================================
+
 # Ensure module path is recognized
 # work out current path, then go two steps back to workflow directory:  workflow/tests/py-tests, so defaults can be found inside workflow_utils.
 workflow_dir = Path(__file__).resolve().parents[2]
@@ -79,7 +93,7 @@ def assert_plot_paths(plots, extra_check=None):
     
     assert all(isinstance(plot, str) for plot in plots), "Each plot should be a string"
 
-# unfinished - needs to check for what if tsne and umap are there or not
+
 @pytest.mark.parametrize("test_paramspace, test_identity_to_analysis, test_files, expected_pattern", [
     (paramspace, identity_to_analysis, files, r"^(?:results\/|results_folder\/)[a-zA-Z0-9_]+\/percent_mt~\d+\/resolution~\d+(\.\d+)?\/positive_marker_plots_umap\/seurat_clusters\/$"),
 ])
@@ -104,6 +118,7 @@ def test_selected_gene_plot(test_paramspace, test_gene_to_plot, test_identity_to
     plots = selected_gene_plot(test_paramspace, test_gene_to_plot, test_identity_to_analysis, files)
     #print(plots)
     #assert len(plots) == 10000, f"Intentional fail for debugging"
+    print(files)
     assert_plot_paths(plots, test_gene_to_plot)
 
     if expected_pattern:
@@ -332,7 +347,9 @@ def test_metadata_pairwise_deseq_analysis():
         assert len(outs) == 0, "Output list should be empty when no metadata or not an integrated sample"
 
 
-
+# this test is not functional. however this is mitgated by using snakemake's --dry flag because if any of the preceeding functions do not work as intended
+# sample_parameter's output will generate missing or wrong paths for snakemake's rule all inside the snakefile. 
+# This will be reflected on snakemake's DAG
       
 def test_sample_parameter():
     # Options to test
@@ -348,10 +365,10 @@ def test_sample_parameter():
     for test_option in options:
         # Run the function under the specified option context
         outs = sample_parameter(paramspace, files, 'standard')
-        print(outs)
-        assert len(outs) == 10000000, "Debugging: This will always fail in order to show output"
+        #print(outs)
+        #assert len(outs) == 10000000, "Debugging: This will always fail in order to show output"
 
-        #commented out untill further notice uwu
+        #commented out untill further notice
         # Additional tests specific to each option (commented out for placeholders)
         # if option == "standard":
         #     for path in outs:

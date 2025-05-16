@@ -11,9 +11,25 @@ test_dir = Path(__file__).resolve().parents[1]
 validRds = test_dir.joinpath('testData', 'cmdTest', 'valid.rds')
 validConfig = test_dir.joinpath('testData', 'cmdTest', 'empty.yaml')
 validMeta = test_dir.joinpath('testData', 'cmdTest', 'empty.csv')
-validKraken = test_dir.joinpath('testData', 'cmdTest', 'krakenTxt')
+validKraken = test_dir.joinpath('testData', 'cmdTest', 'kraken.txt')
 
 from cellsnake.command_line import *
+
+
+
+# ==============================================
+# Test suite for the cellsnake.command_line module.
+#
+# This file contains pytest-based unit tests that validate:
+# - Command-line argument parsing and validation logic
+# - Configuration file loading and parameter extraction
+# - Logging functionality within the CommandLine class
+# - The main entry point behavior under different CLI flag scenarios
+#
+# Tests cover both expected successful workflows and failure cases,
+# using mocks and parameterized inputs to simulate a wide range of user inputs
+# and system states without needing actual file system dependencies.
+# ================================================
 
 # Global argument list
 argument_list = {
@@ -60,10 +76,7 @@ argument_list = {
         # Case 8: Invalid taxa value (Failure)
         ({**argument_list, "--taxa": "invalid_taxa"}, False),
 
-        # Case 9: Kraken DB folder exists but inspect.txt is missing (Failure)
-        # ({**argument_list, "--kraken_db_folder": test_dir.joinpath('testData', 'cmdTest', 'krakenNoTxt')}, False),
-
-        # Case 10: Without required input file (Failure)
+        # Case 9: Without required input file (Failure)
         ({**argument_list, "<INPUT>": 'no'}, False),
     ]
 )

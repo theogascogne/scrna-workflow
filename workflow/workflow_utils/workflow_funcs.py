@@ -4,17 +4,23 @@ import pathlib
 import sys
 import os
 
-# this script is meant to read the given directory and look for files based on the 10x genomics format. The try function checks for other viable dirctories
-# in case the .gz or .h5 arent found at first.
-# once found, it will use cellsnake_glob_wildcards to create wildcard for each sample found. These wildcards are then used by sample_parameter
-# inside create_plot_functions to generate file paths for each of the samples during cellsnake's workflow. 
+# =================================================================
+# This script' functions scans a given data folder for 10x Genomics formatted sample files.
+# It looks for matrix files in typical locations (.mtx.gz, .mtx, .h5),
+# and tries fallback directories if initial attempts fail.
+#
+# The found sample names (wildcards) are used in the workflow to dynamically
+# generate file paths for each sample.
+# It already has the samples made, but if the directory is correct, it will return the sample names
+#
+# outputs:
+#   a list of samples for snakemake wildcard - these are used by the scripts inside create_plot_functions.py
+# =================================================================
 
 workflow_dir = pathlib.Path(__file__).resolve()
 sys.path.append(str(workflow_dir))
 from workflow_utils.extra_functions import cellsnake_glob_wildcards
 from workflow_utils.Defaults import config
-
-#testData_dir = os.path.expanduser("~/cellsnake/cellsnake/scrna/workflow/tests/workHere/testData (another copy)")
 
 files=[]
 def file_capture(datafolder):

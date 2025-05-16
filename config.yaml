@@ -56,3 +56,6 @@ species: "human" #human or mouse is accepted, http://www.cellchat.org/cellchatdb
 #integration params
 dims: 30
 reduction: "cca"
+
+#interactive error handle
+errHandle: False

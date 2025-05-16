@@ -3,10 +3,32 @@ from pathlib import Path
 from snakemake.io import expand
 import sys
 
-# this is called at the end of the snakefile when sample_parameter is used.
-# this script creates every file path that snakemake will use to carry out the selected workflow based on what argument is used
-# as seen at the bottom of the script with sample_parameter
-# generate_plots will create the path, hopefully making the calls to it easier to read
+# =============================================================
+# create_plot_functions.py
+# 
+# This script is called at the end of the Snakefile execution when 'sample_parameter' is used
+# to generate a comprehensive list of file paths for snakemake's rule all which snakemake will create a DAG from
+#
+# Core purpose:
+# -------------
+# - Receives main workflow argument from the CLI wrapper via 'sample_parameter'.
+# - Dynamically constructs output file paths for various plot types, tables, and analyses
+#   based on workflow options and input sample metadata.
+#
+# Key functions:
+# --------------
+# - generate_plots: Builds lists of file paths for different plot types and formats, handling
+#   optional gene-specific plots, identities, and file extensions.
+# - identity_dependent_dimplot / selected_gene_plot / enrichment_analysis / etc.: Wrapper
+#   functions to group related plot types and generate corresponding file paths.
+# - sample_parameter: The main entry point that selects which groups of plots/files to generate
+#   based on the workflow mode option ('minimal', 'standard', 'advanced', etc.).
+#
+# Important notes:
+# ----------------
+# - All configuration parameters are sourced from a centralized config object imported from
+#   'workflow_utils.Defaults', specifically the 'defaults.py'.
+# =============================================================
 
 # os.path.expanduser needs to be used to handle home directory path
 workflow_dir = Path(__file__).resolve().parents[1]

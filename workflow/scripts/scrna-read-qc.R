@@ -1,68 +1,34 @@
 #!/usr/bin/env Rscript
 
-# Load optparse package first
-require(optparse)
-require(tidyverse)
-require(Seurat)
-require(patchwork)
-require(tools)
-require(data.table)
+# Load required packages
+library(optparse)
+library(tidyverse)
+library(Seurat)
+library(patchwork)
+library(tools)
+library(data.table)
 
+# Get the path to the 'cellsnake' package
+cellsnake_path <- system("python -c 'import cellsnake; print(cellsnake.__path__[0])'", intern = TRUE)
 
-# Define the option list using the optparse functions
+# Define the base path to the testData folder
+test_data_dir <- file.path(cellsnake_path, "scrna/workflow/tests/testData")
+
+# Define command line options
 option_list <- list(
-  make_option(c("--min.cells"),
-    type = "integer", default = 3,
-    help = "Min cells [default= %default]", metavar = "integer"
-  ),
-  make_option(c("--min.features"),
-    type = "integer", default = 200,
-    help = "Min features, nFeature_RNA [default= %default]", metavar = "character"
-  ),
-  make_option(c("--max.features"),
-    type = "integer", default = Inf, # inf DOES NOT WORK for optparse, this is fixed under the optparse section
-    help = "Max features, nFeature_RNA [default= %default]", metavar = "character"
-  ),
-  make_option(c("--max.molecules"),
-    type = "integer", default = Inf,  # inf DOES NOT WORK for optparse, this is fixed under the optparse section
-    help = "Max molecules, nCount_RNA [default= %default]", metavar = "character"
-  ),
-  make_option(c("--min.molecules"),
-    type = "integer", default = 0,
-    help = "Min molecules, nCount_RNA [default= %default]", metavar = "character"
-  ),
-  make_option(c("--data.dir"),
-    type = "character", default = NULL,
-    help = "Data directory", metavar = "character"
-  ),
-  make_option(c("--sampleid"),
-    type = "character", default = NULL,
-    help = "Sample ID", metavar = "character"
-  ),
-  make_option(c("--percent.mt"),
-    type = "character", default = "10",
-    help = "Max mitochondrial gene percentage, smaller than [default= %default]", metavar = "character"
-  ),
-  make_option(c("--percent.rp"),
-    type = "double", default = 0,
-    help = "Min ribosomal gene percentage, greater than [default= %default]", metavar = "character"
-  ),
-  make_option(c("--before.violin.plot"),
-    type = "character", default = "before.violin.pdf",
-    help = "Violin plot name [default= %default]", metavar = "character"
-  ),
-  make_option(c("--after.violin.plot"),
-    type = "character", default = "after.violin.pdf",
-    help = "Violin plot name [default= %default]", metavar = "character"
-  ),
-  make_option(c("--output.rds"),
-    type = "character", default = "output.rds",
-    help = "Output RDS file name [default= %default]", metavar = "character"
-  ),
-  make_option(c("--plot.mtplot"),
-    type = "character", default = "plot.mtplot.pdf",
-    help = "Violin plot name [default= %default]", metavar = "character"
-  )
+  make_option(c("--min.cells"), type = "integer", default = 3),
+  make_option(c("--min.features"), type = "integer", default = 200),
+  make_option(c("--max.features"), type = "integer", default = Inf),
+  make_option(c("--max.molecules"), type = "integer", default = Inf),
+  make_option(c("--min.molecules"), type = "integer", default = 0),
+  make_option(c("--data.dir"), type = "character", default = file.path(cellsnake_path, "scrna/workflow/tests/testData/data/testSample/outs/filtered_feature_bc_matrix")),
+  make_option(c("--sampleid"), type = "character", default = "defaultRun"),
+  make_option(c("--percent.mt"), type = "character", default = "10"),
+  make_option(c("--percent.rp"), type = "double", default = 0),
+  make_option(c("--before.violin.plot"), type = "character", default = "Cellsnake_DefaultRun/results/before.violin.pdf"),
+  make_option(c("--after.violin.plot"), type = "character", default = "Cellsnake_DefaultRun/results/after.violin.pdf"),
+  make_option(c("--output.rds"), type = "character", default = "Cellsnake_DefaultRun/raw/output.rds"),
+  make_option(c("--plot.mtplot"), type = "character", default = "Cellsnake_DefaultRun/results/plot.mtplot.pdf")
 )
 
 if (!exists("opt")) {
@@ -70,164 +36,58 @@ if (!exists("opt")) {
   opt <- parse_args(opt_parser)
 }
 
+try(
+  {
+    source(file.path(cellsnake_path,"scrna/workflow/scripts/scrna_workflow_helper_functions/scrna-read-qc-functions.R"))
+  },
+  silent = TRUE
+)
+
+# Ensure required arguments are present
+if (is.null(opt$data.dir) || is.null(opt$sampleid)) {
+  print_help(opt_parser)
+  stop("Must supply --data.dir and --sampleid.", call. = FALSE)
+}
+
+# Handle optparse bug with Inf
 if (is.na(opt$max.features)) opt$max.features <- Inf
 if (is.na(opt$max.molecules)) opt$max.molecules <- Inf
 
-# for debugging interactive error handling, this will force a error exit
-# Force the failure
-#quit(status = 1)  # non-zero status forces failure
+# --- MAIN PIPELINE ---
 
-#########################
-# Function to ensure directory exists before saving files
-ensure_dir_exists <- function(file_path) {
-  dir_path <- dirname(file_path)
-  if (!dir.exists(dir_path)) {
-    message("Creating missing directory: ", dir_path)
-    dir.create(dir_path, recursive = TRUE)
-  }
-}
-########################
+# read input data
+scrna.data <- function_read_input(opt)
 
-
-
-#opt$data.dir <- "~/Documents/cellsnake_shared/fetal-brain/data/10X_17_029/outs/filtered_feature_bc_matrix"
-#opt$sampleid <- "seur5"
-
-if (is.null(opt$data.dir) || is.null(opt$sampleid)) {
-  print_help(opt_parser)
-  stop("At least one argument must be supplied (data.dir and sampleid)", call. = FALSE)
-}
-
-# nFeature_RNA is the number of genes detected in each cell. nCount_RNA is the total number of molecules detected within a cell.
-
-function_read_input <- function(opt) {
-  try(
-    {
-      scrna.data <- Read10X(data.dir = opt$data.dir)
-      return(scrna.data)
-    },
-    silent = TRUE
-  )
-  try(
-    {
-      scrna.data <- Read10X_h5(filename = paste0(opt$data.dir, "/filtered_feature_bc_matrix.h5"))
-      return(scrna.data)
-    },
-    silent = TRUE
-  )
-  try(
-    {
-      scrna.data <- Read10X_h5(filename = opt$data.dir)
-      return(scrna.data)
-    },
-    silent = TRUE
-  )
-
-  try(
-    {
-      x <- tolower(file_ext(opt$data.dir))
-
-      if (x %in% c("h5")) {
-        scrna.data <- Read10X_h5(filename = opt$data.dir)
-      } else if (x %in% c("gz")) {
-        scrna.data <- fread(cmd = paste("gunzip -dc", opt$data.dir))
-
-        scrna.data <- scrna.data %>% column_to_rownames("V1")
-      } else if (x %in% c("zip")) {
-        scrna.data <- fread(cmd = paste("unzip -p", opt$data.dir))
-
-        scrna.data <- scrna.data %>% column_to_rownames("V1")
-      } else if (x %in% c("csv", "tsv")) {
-        scrna.data <- fread(paste(opt$data.dir))
-
-        scrna.data <- scrna.data %>% column_to_rownames("V1")
-      }
-      return(scrna.data)
-    },
-    silent = TRUE
-  )
-}
-
-
-
-function_read_input(opt) -> scrna.data
-
-
-
-
-scrna <- CreateSeuratObject(counts = scrna.data, project = make.names(opt$sampleid), min.cells = opt$min.cells, min.features = opt$min.features)
+# from dgmartix made from previus step, create the seurat object
+scrna <- CreateSeuratObject(scrna.data, project = make.names(opt$sampleid), min.cells = opt$min.cells, min.features = opt$min.features)
 rm(scrna.data)
 
+message("Preparing Seurat object...")
+scrna <- prepare_seurat_object_for_qc(scrna, opt)
 
-scrna <- RenameCells(object = scrna, add.cell.id = make.names(opt$sampleid)) # add cell.id to cell name
+message("Plotting pre-filtering violin plot...")
+ensure_dir_exists(opt$before.violin.plot)
+plot_qc_violin(scrna, opt$before.violin.plot)
 
+message("Applying feature/molecule filters...")
+scrna <- filter_cells_by_qc_thresholds(scrna, opt)
 
-scrna[["percent.mt"]] <- PercentageFeatureSet(scrna, pattern = "^[Mm][Tt]-")
-scrna[["percent.rp"]] <- PercentageFeatureSet(scrna, pattern = "(?i)(^RP[SL])")
-
-ensure_dir_exists(opt$before.violin.plot) 
-
-scrna <- NormalizeData(scrna)  # This fills the "data" slot in RNA assay, needed as seurat 5 does not automatically store normalized data in 'data slot'
-VlnPlot(scrna, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.rp"), ncol = 4)
-ggsave(opt$before.violin.plot, width = 10, height = 4)
-
-# auto detection is obsolote but keep it for later use
-# lower_bound_nCount_RNA <- median(scrna$nCount_RNA) - 3 * mad(scrna$nCount_RNA, constant = 1)
-# upper_bound_nCount_RNA <- median(scrna$nCount_RNA) + 3 * mad(scrna$nCount_RNA, constant = 1)
-# lower_bound_nFeature_RNA <- median(scrna$nFeature_RNA) - 3 * mad(scrna$nFeature_RNA, constant = 1)
-# upper_bound_nFeature_RNA <- median(scrna$nFeature_RNA) + 3 * mad(scrna$nFeature_RNA, constant = 1)
-
-## subset
-# the top one here is the correct one, not the ones with bounds
-scrna <- subset(scrna, subset = nFeature_RNA < opt$max.features & nFeature_RNA >= opt$min.features & nCount_RNA < opt$max.molecules & nCount_RNA >= opt$min.molecules)
-#scrna <- subset(scrna, subset = nFeature_RNA < 5000 & nFeature_RNA >= 200 & nCount_RNA < 100000 & nCount_RNA >= 1000)
-
-# scrna <- subset(scrna, subset = nFeature_RNA > lower_bound_nFeature_RNA & nFeature_RNA < upper_bound_nFeature_RNA & nCount_RNA > lower_bound_nCount_RNA  & nCount_RNA < upper_bound_nCount_RNA & percent.mt < opt$percent.mt)
-
-if (opt$percent.mt %in% c("auto", "Auto", "AUTO")) {
-  if (isFALSE(all(scrna@meta.data$percent.mt == 0))) {
-    require(SingleCellExperiment)
-    require(miQC)
-    require(scater)
-
-
-    smObjSCE <- as.SingleCellExperiment(scrna)
-    mt_genes <- grepl("^[Mm][Tt]-", rownames(smObjSCE))
-    feature_ctrls <- list(mito = rownames(smObjSCE)[mt_genes])
-    smObjSCE <- addPerCellQC(smObjSCE, subsets = feature_ctrls)
-
-    tryCatch(
-      {
-        model <- mixtureModel(smObjSCE)
-        p1 <- plotModel(smObjSCE, model)
-        p2 <- plotMetrics(smObjSCE)
-        ggsave(filename = opt$plot.mtplot, p1 + p2, width = 10, height = 4)
-        smObjSCE <- filterCells(smObjSCE, model)
-        scrna <- scrna[, colnames(smObjSCE)]
-        return(scrna)
-      },
-      error = function(a) {
-        upper_bound_MT <- median(scrna$percent.mt) + 1 * mad(scrna$percent.mt, constant = 1) # miQC failed, use median absolute deviation
-
-        scrna <- subset(scrna, subset = percent.mt <= upper_bound_MT)
-        p1 <- plot.new()
-        p2 <- plotMetrics(smObjSCE)
-
-        ggsave(filename = opt$plot.mtplot, p1 + p2, width = 10, height = 4)
-        return(scrna)
-      }
-    ) -> scrna
-  }
+# Mitochondrial QC
+if (tolower(opt$percent.mt) == "auto") {
+  message("Running miQC auto-thresholding...")
+  ensure_dir_exists(opt$plot.mtplot)
+  scrna <- run_miQC_or_fallback(scrna, opt, opt$plot.mtplot)
 } else {
   scrna <- subset(scrna, subset = percent.mt <= as.numeric(opt$percent.mt))
 }
 
+# Ribosomal filter
 scrna <- subset(scrna, subset = percent.rp >= opt$percent.rp)
 
+# Plotting post-filter QC
+ensure_dir_exists(opt$after.violin.plot)
+plot_qc_violin(scrna, opt$after.violin.plot)
 
-ensure_dir_exists(opt$after.violin.plot) 
-VlnPlot(scrna, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.rp"), ncol = 4)
-ggsave(opt$after.violin.plot, width = 10, height = 4)
-
-ensure_dir_exists(opt$output.rds)  # Ensure the directory exists for the RDS file
-saveRDS(scrna, file = opt$output.rds)
+# Saving output
+ensure_dir_exists(opt$output.rds)
+saveRDS(scrna, opt$output.rds)

@@ -7,6 +7,29 @@ import pathlib
 import sys
 import subprocess
 
+# =============================
+#
+# Snakefile for single-cell RNA-seq workflow automation using Snakemake.
+#
+# Purpose:
+# This Snakefile receives commands from the CLI wrapper 'command_line.py' and
+# uses them to determine which analyses and plots to generate for the 'rule all'
+# input targets. From there, Snakemake constructs the workflow DAG accordingly.
+#
+# Features:
+# - Takes high-level commands from the CLI wrapper to drive workflow execution.
+# - Dynamically generates input targets via helper functions for plotting and analysis.
+# - Delegates the dependency resolution and job execution to Snakemake based on those targets.
+#
+# Notes:
+# - The extensive variable declarations at the top are required for the .smk rule files
+#   to set up wildcards and access configuration variables.
+# - All configuration variables originate from a centralized config file named 'defaults.py'
+#   to ensure consistent parameter usage throughout the workflow and rule files.
+# - This snakefile uses a series of python functions to generate the mentioned plots, functions are called based on main argument (minimal/standard etc)
+#
+# =============================
+
 from snakemake.utils import Paramspace
 import pandas as pd
 from snakemake.io import expand
@@ -14,17 +37,23 @@ from itertools import repeat
 
 # Including external files by purpose
 include: "rules/extra_functions.smk"
+
 # Importing Python files
 from workflow_utils.workflow_funcs import file_capture_try, initialization_of_paramspace
 from workflow_utils.create_plot_functions import sample_parameter
-from workflow_utils.Defaults import config as configDef #renamed to configDef as snakemake uses its own config if a .yaml is used.
+
+# renamed to configDef as snakemake uses its own config if a .yaml is used.
+from workflow_utils.Defaults import config as configDef
 
 # Configuration settings - these have to be declared here too or else the rules will not have access to them. While snakefile does have its own config as mentioned
-# above, its default have been merged with Defaults's configs so both snakefile and python scripts share the same settings and dont have to declare its defaults
+# above, its default have been merged with Defaults's configs so both snakefile and python scripts share the same settings and dont have to declare its defaults.
+# functionally, these would be the same as config.get as the default python file will use the yaml if it exists.
 # this script's 'native' config is based on config.yaml
+
 option = config.get("option", "standard")  # bug where it wont accept option from Defaults.py. Alltho because sample parameter uses this in its arguments, the 
                                            # rest of the .py should have access to it too during runtime, not during unit testing so keep that in mind!
-cellsnake_path=config.get('cellsnake_path','') #if called by cellsnake - this needs to come from .yaml, investigate why.
+                                           
+cellsnake_path=config.get('cellsnake_path','')
 
 runid = configDef.runid
 logname = configDef.logname
@@ -97,45 +126,34 @@ complexity = configDef.complexity
 reduction = configDef.reduction
 dims = configDef.dims
 
+errHandle = configDef.errHandle
+
 files = file_capture_try(datafolder)
 par_df = initialization_of_paramspace("params.tsv",{"percent_mt":[percent_mt],"resolution":[resolution]})
 paramspace=Paramspace(par_df)
-#interactive error handling
-error_handler = "~/miniconda3/envs/test/lib/python3.9/site-packages/cellsnake/scrna/workflow/workflow_utils/intErrHandle.sh"
 
-# Check for test mode
-is_test_mode = config.get("test", False)
-
-samples = ["10X_17_028", "10X_17_029"] # debugging purpose.
-
-#Bare-bones error handler - a work in progress to see if its possible to give the user more control during job error if they wish to skip, retry or quit the workflow.
-def halt_workflow():
-    print("\nA rule failed during execution.")
-    print("Choose an action:")
-    print("[r] Retry the rule.")
-    print("[q] Quit the workflow.")
-        
-    choice = input("Enter your choice (r/q): ").strip().lower()
-    snakefile_dir = os.path.expanduser("~/miniconda3/envs/test/lib/python3.9/site-packages/cellsnake/scrna/workflow")
-        
-    if choice == "r":
-        print("Retrying the rule...")
-        subprocess.run("snakemake --retries 1 --rerun-incomplete -k --cores 2", shell=True, cwd=snakefile_dir)
-    elif choice == "q":
-        print("Quitting the workflow. Goodbye!")
-        sys.exit(1)  # Exits the workflow.
-    else:
-        print("Invalid input. Please enter 'r' to retry or 'q' to quit.")
+# samples = ["10X_17_029"] # debugging purpose.
 
 # Decide which rules to include based on 'option' and test mode
-if option in ["test"] and files:
-    include: "rules/seuratTest.smk"
-    rule all:
-        input:
-            sample_parameter(paramspace,files, option)  # Use the test input list function if test mode is on
-            #expand("results/{sample}/resolution~0.8/output.txt", sample=samples)
+if option == "test":
+    # Get the test mode from config
+    mode = config.get("test_mode", "")  # Assuming the mode is passed through --config test_mode=<mode>
 
-#this part can be improved by encapsulating the integration/integrate conditional's content in a function
+    # Include the rules file that contains the tests
+    include: "rules/seuratTest.smk"
+
+    if mode == "all":
+        rule all:
+            input:
+                f"{cellsnake_path}workflow/tests/testData/results/test_complete.txt"
+    elif mode == "cover":
+        rule all:
+            input:
+                f"{cellsnake_path}scrna/workflow/tests/testData/test_coverage.csv"
+    else:
+        print(f"Unknown test mode '{mode}', please use 'all' or 'cover'.")
+        exit(1)  # Exit if the mode is not recognized
+
 
 elif option in ["integration","integrate"]:
     #integration_files = list(pathlib.Path("analyses/processed/").rglob("*.rds"))
@@ -186,8 +204,3 @@ elif option in ["subset"] and files:
 else:
     print("Please select a correct option or no files detected...")
     pass
-
-# Error handler to signal the wrapper
-# On error, call the above function
-#onerror:
-    #halt_workflow()
